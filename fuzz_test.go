@@ -36,8 +36,9 @@ func FuzzSealedOpen(f *testing.F) {
 	f.Fuzz(func(t *testing.T, path, stored string) {
 		plain, kid, err := s.open(path, stored)
 		if err == nil {
-			// Only a value this store sealed for this very path can open.
-			if stored != good || path != p || plain != "plain" || kid != s.current.id {
+			// Only a value this store sealed for this very path can open (the
+			// caller checks the prefix before open, which tolerates its absence).
+			if strings.TrimPrefix(stored, sealPrefix) != strings.TrimPrefix(good, sealPrefix) || path != p || plain != "plain" || kid != s.current.id {
 				t.Fatalf("accepted %q at %q as %q", stored, path, plain)
 			}
 			return
@@ -48,6 +49,28 @@ func FuzzSealedOpen(f *testing.F) {
 			t.Fatalf("error echoes the sealed body: %v", err)
 		}
 	})
+}
+
+// Go's base64 decoder skips CR and LF; the parser must not, or one ciphertext
+// has many stored spellings.
+func TestOpenRefusesANonCanonicalEncoding(t *testing.T) {
+	s, err := NewSealedStore(NewMemStore(), strings.Repeat("k", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := s.current.seal("/p", "plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.open("/p", sealed); err != nil {
+		t.Fatal(err)
+	}
+	cut := len(sealPrefix) + len(s.current.id) + 1 + 5
+	for _, ws := range []string{"\r", "\n", "\r\n"} {
+		if _, _, err := s.open("/p", sealed[:cut]+ws+sealed[cut:]); err == nil {
+			t.Errorf("accepted %q inside the body", ws)
+		}
+	}
 }
 
 func TestSealSealOpenRoundTripAnyPlaintext(t *testing.T) {

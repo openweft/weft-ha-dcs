@@ -141,7 +141,9 @@ func (s *SealedStore) open(path, stored string) (plain, kid string, err error) {
 	}
 	ct, err := base64.RawURLEncoding.DecodeString(body)
 	ns := k.aead.NonceSize()
-	if err != nil || len(ct) < ns {
+	// Go's decoder skips \r and \n, so one ciphertext would have many stored
+	// spellings (found by FuzzSealedOpen): accept only the canonical encoding.
+	if err != nil || len(ct) < ns || base64.RawURLEncoding.EncodeToString(ct) != body {
 		return "", "", fmt.Errorf("sealed value at %s is malformed", path)
 	}
 	pt, err := k.aead.Open(nil, ct[:ns], ct[ns:], []byte(path))
