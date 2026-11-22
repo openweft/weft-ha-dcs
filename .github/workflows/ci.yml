@@ -70,7 +70,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   arches:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
