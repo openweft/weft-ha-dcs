@@ -182,6 +182,24 @@ func (e *EtcdStore) ReplaceKey(ctx context.Context, key, prev, next string) (boo
 	return resp.Succeeded, nil
 }
 
+// DeleteKey implements Deleter : a Txn that deletes key only if it exists, so
+// "was there one" is answered atomically. The history keeps the old revisions
+// until Compact (and, on disk, a defragmentation).
+func (e *EtcdStore) DeleteKey(ctx context.Context, key string) (bool, error) {
+	kv, err := e.kv(ctx)
+	if err != nil {
+		return false, err
+	}
+	resp, err := kv.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(key), ">", 0)).
+		Then(clientv3.OpDelete(key)).
+		Commit()
+	if err != nil {
+		return false, fmt.Errorf("etcd Txn(%s): %w", key, err)
+	}
+	return resp.Succeeded, nil
+}
+
 // Compact implements Rewriter : it compacts to the current revision, dropping
 // every superseded revision (a replaced plaintext value among them).
 func (e *EtcdStore) Compact(ctx context.Context) error {
@@ -255,4 +273,5 @@ func (e *EtcdStore) Close() error {
 var (
 	_ Store    = (*EtcdStore)(nil)
 	_ Rewriter = (*EtcdStore)(nil)
+	_ Deleter  = (*EtcdStore)(nil)
 )

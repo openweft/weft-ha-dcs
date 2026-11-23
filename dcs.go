@@ -68,6 +68,13 @@ func (m *MemStore) ReplaceKey(_ context.Context, path, prev, next string) (bool,
 	return true, nil
 }
 
+// DeleteKey implements Deleter.
+func (m *MemStore) DeleteKey(_ context.Context, path string) (bool, error) {
+	_, ok := m.keys[path]
+	delete(m.keys, path)
+	return ok, nil
+}
+
 // Compact implements Rewriter ; a map keeps no history.
 func (m *MemStore) Compact(context.Context) error { return nil }
 

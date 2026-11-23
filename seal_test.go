@@ -191,6 +191,59 @@ func (f *failStore) Compact(context.Context) error {
 	return f.compactErr
 }
 
+func TestSealedDeleteKey(t *testing.T) {
+	raw := NewMemStore()
+	f := &failStore{MemStore: raw}
+	s := newSealed(t, f, keyA)
+	// absent: no-op, no compaction
+	if ok, err := s.DeleteKey(ctx, spath); err != nil || ok || f.compactCalls != 0 {
+		t.Fatalf("absent: (%v, %v), compactions %d", ok, err, f.compactCalls)
+	}
+	// plaintext (legacy) and sealed values are both removed without being opened
+	raw.PutKeyIfAbsent(ctx, spath, val)
+	if ok, err := s.DeleteKey(ctx, spath); err != nil || !ok {
+		t.Fatalf("plaintext: (%v, %v)", ok, err)
+	}
+	if rawOf(t, raw, spath) != "" || f.compactCalls != 1 {
+		t.Fatalf("plaintext left or not compacted (%d)", f.compactCalls)
+	}
+	if _, err := s.PutKeyIfAbsent(ctx, spath, val); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DeleteKey(ctx, spath); err != nil || !ok || rawOf(t, raw, spath) != "" || f.compactCalls != 2 {
+		t.Fatalf("sealed: (%v, %v)", ok, err)
+	}
+	// a failed compaction is not fatal
+	f.compactErr = errors.New("boom")
+	raw.PutKeyIfAbsent(ctx, spath, val)
+	if ok, err := s.DeleteKey(ctx, spath); err != nil || !ok {
+		t.Fatalf("compaction failure: (%v, %v)", ok, err)
+	}
+}
+
+func TestSealedDeleteKeyNeedsADeleter(t *testing.T) {
+	s := newSealed(t, &noDelete{NewMemStore()}, keyA)
+	if _, err := s.DeleteKey(ctx, spath); err == nil {
+		t.Fatal("a store without DeleteKey was accepted")
+	}
+}
+
+// noDelete is a Rewriter that cannot delete.
+type noDelete struct{ m *MemStore }
+
+func (n *noDelete) GetKey(c context.Context, p string) (string, error) { return n.m.GetKey(c, p) }
+func (n *noDelete) PutKeyIfAbsent(c context.Context, p, v string) (bool, error) {
+	return n.m.PutKeyIfAbsent(c, p, v)
+}
+func (n *noDelete) AcquireBootstrapLock(c context.Context, o string) (func(), error) {
+	return n.m.AcquireBootstrapLock(c, o)
+}
+func (n *noDelete) Close() error { return nil }
+func (n *noDelete) ReplaceKey(c context.Context, p, a, b string) (bool, error) {
+	return n.m.ReplaceKey(c, p, a, b)
+}
+func (n *noDelete) Compact(c context.Context) error { return n.m.Compact(c) }
+
 func TestStoreErrorsPropagate(t *testing.T) {
 	boom := errors.New("boom")
 	f := &failStore{MemStore: NewMemStore(), getErr: boom}
