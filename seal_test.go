@@ -165,6 +165,7 @@ type plainStore struct{ Store }
 type failStore struct {
 	*MemStore
 	getErr, replaceErr, compactErr error
+	deleteErr                      error
 	replaceFalse                   bool
 	compactCalls                   int
 }
@@ -184,6 +185,13 @@ func (f *failStore) ReplaceKey(c context.Context, p, a, b string) (bool, error) 
 		return false, nil
 	}
 	return f.MemStore.ReplaceKey(c, p, a, b)
+}
+
+func (f *failStore) DeleteKey(c context.Context, p string) (bool, error) {
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
+	return f.MemStore.DeleteKey(c, p)
 }
 
 func (f *failStore) Compact(context.Context) error {
@@ -218,6 +226,14 @@ func TestSealedDeleteKey(t *testing.T) {
 	raw.PutKeyIfAbsent(ctx, spath, val)
 	if ok, err := s.DeleteKey(ctx, spath); err != nil || !ok {
 		t.Fatalf("compaction failure: (%v, %v)", ok, err)
+	}
+}
+
+func TestSealedDeleteKeyPropagatesTheInnerError(t *testing.T) {
+	boom := errors.New("boom")
+	f := &failStore{MemStore: NewMemStore(), deleteErr: boom}
+	if ok, err := newSealed(t, f, keyA).DeleteKey(ctx, spath); !errors.Is(err, boom) || ok || f.compactCalls != 0 {
+		t.Fatalf("(%v, %v), compactions %d", ok, err, f.compactCalls)
 	}
 }
 

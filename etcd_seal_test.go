@@ -90,4 +90,7 @@ func TestEtcdKVConnectFailure(t *testing.T) {
 	if err := e.Compact(ctx); err == nil {
 		t.Fatal("Compact connected to nothing")
 	}
+	if _, err := e.DeleteKey(ctx, "/k"); err == nil {
+		t.Fatal("DeleteKey connected to nothing")
+	}
 }
