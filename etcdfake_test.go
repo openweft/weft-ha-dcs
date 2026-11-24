@@ -163,6 +163,15 @@ func (m *memEtcd) Txn(_ context.Context, r *etcdserverpb.TxnRequest) (*etcdserve
 		case op.GetRequestPut() != nil:
 			m.putLocked(op.GetRequestPut())
 			out = append(out, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponsePut{ResponsePut: &etcdserverpb.PutResponse{Header: m.header()}}})
+		case op.GetRequestDeleteRange() != nil:
+			d := op.GetRequestDeleteRange()
+			var n int64
+			if _, have := m.kvs[string(d.Key)]; have {
+				delete(m.kvs, string(d.Key))
+				m.rev++
+				n = 1
+			}
+			out = append(out, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseDeleteRange{ResponseDeleteRange: &etcdserverpb.DeleteRangeResponse{Header: m.header(), Deleted: n}}})
 		case op.GetRequestRange() != nil:
 			out = append(out, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseRange{ResponseRange: m.rangeLocked(op.GetRequestRange())}})
 		}
@@ -348,6 +357,37 @@ func TestEtcdStoreReplaceKeyIsACompareAndSwapOnTheValue(t *testing.T) {
 	}
 	if v, _ := m.value("/ns/a"); v != "y" {
 		t.Fatalf("value = %q", v)
+	}
+}
+
+func TestEtcdStoreDeleteKeyRemovesAKeyAndIsIdempotent(t *testing.T) {
+	m := newMemEtcd()
+	e := fakeStore(t, m)
+	ctx := tctx(t)
+	if ok, err := e.DeleteKey(ctx, "/ns/a"); err != nil || ok {
+		t.Fatalf("absent key: (%v, %v)", ok, err)
+	}
+	if _, err := e.PutKeyIfAbsent(ctx, "/ns/a", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.PutKeyIfAbsent(ctx, "/ns/b", "y"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := e.DeleteKey(ctx, "/ns/a"); err != nil || !ok {
+		t.Fatalf("present key: (%v, %v)", ok, err)
+	}
+	if _, have := m.value("/ns/a"); have {
+		t.Fatal("key still present")
+	}
+	if v, _ := m.value("/ns/b"); v != "y" {
+		t.Fatal("a neighbour key was touched")
+	}
+	if ok, err := e.DeleteKey(ctx, "/ns/a"); err != nil || ok {
+		t.Fatalf("second delete: (%v, %v)", ok, err)
+	}
+	m.setFail("Txn", true)
+	if _, err := e.DeleteKey(ctx, "/ns/b"); err == nil || !strings.Contains(err.Error(), "etcd Txn(/ns/b)") {
+		t.Fatalf("refused Txn: %v", err)
 	}
 }
 

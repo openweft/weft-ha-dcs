@@ -60,6 +60,12 @@ type Rewriter interface {
 	Compact(ctx context.Context) error
 }
 
+// Deleter is an optional capability of a Store: removing a key. DeleteKey
+// reports whether the key existed; deleting an absent key is not an error.
+type Deleter interface {
+	DeleteKey(ctx context.Context, path string) (bool, error)
+}
+
 func must[T any](v T, err error) T {
 	if err != nil {
 		panic("dcs: " + err.Error())
@@ -187,6 +193,25 @@ func (s *SealedStore) GetKey(ctx context.Context, path string) (string, error) {
 		// A peer changed the value first: read again.
 	}
 	return "", fmt.Errorf("value at %s kept changing while it was being sealed", path)
+}
+
+// DeleteKey removes path (sealed or legacy plaintext, without opening it) and
+// compacts the history so the old revisions are dropped. It reports whether the
+// key existed; an inner store that cannot delete is an error.
+func (s *SealedStore) DeleteKey(ctx context.Context, path string) (bool, error) {
+	d, ok := s.Store.(Deleter)
+	if !ok {
+		return false, errors.New("dcs: store cannot delete keys")
+	}
+	existed, err := d.DeleteKey(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	if existed {
+		s.compactPending.Store(true)
+		s.compactIfPending(ctx)
+	}
+	return existed, nil
 }
 
 // compactIfPending drops the superseded revisions. A failure is not fatal (the
